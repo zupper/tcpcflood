@@ -1,0 +1,8 @@
+
+To add the rule:
+	sudo iptables -A INPUT -p tcp --destination-port 20000:65535 -j DROP
+
+To remove the rule (removes all iptables rules actually):
+	sudo iptables -F
+
+
